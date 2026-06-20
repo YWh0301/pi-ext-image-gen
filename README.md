@@ -59,7 +59,7 @@ Environment variables also work: `DASHSCOPE_API_KEY`, etc.
 | `none` | inline only (default) |
 | `project` | auto-name in project root |
 | `output.png` | save to specific path |
-| `global` | auto-name in ~/.pi/agent/generated-images/ |
+| (path) | save to specific path like `output.png` |
 
 **Re-save after generation**: use the handle from `generate_image` result:
 ```bash

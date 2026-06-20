@@ -184,7 +184,6 @@ Location: `~/.pi/agent/image-gen.json`
 The `save` parameter in `generate_image` controls disk saving:
 - `"none"` — inline only (default)
 - `"project"` — auto-name `image.png` → `image_1.png` → etc. in project root
-- `"global"` — auto-name in `~/.pi/agent/generated-images/`
 - Any path string — save to specific path (e.g. `"output.png"`)
 
 If the target file exists for a custom path, generation still succeeds but returns a `saveConflict` message. The agent should then use `save_image` with the returned handle.

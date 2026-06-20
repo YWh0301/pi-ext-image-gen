@@ -27,7 +27,6 @@
  *   save=none       - 不存盘，仅 inline 渲染
  *   save=project    - 自动命名存工程根目录，防覆盖
  *   save=<path>     - 存到指定路径，如 save=output.png 或 save=/abs/path/img.png
- *   save=global     - 自动命名存 ~/.pi/agent/generated-images/
  *   默认 save=none。agent 应主动提供 save 参数。
  */
 
@@ -54,13 +53,12 @@ interface Config {
   save?: SaveMode;
 }
 
-type SaveMode = "none" | "project" | "global";
+type SaveMode = "none" | "project";
 
 /**
  * Parse save parameter.
  * - "none" | undefined → no save
  * - "project" → auto-name in cwd, no overwrite
- * - "global" → auto-name in ~/.pi/agent/generated-images/, no overwrite
  * - anything else → treated as file path (relative to cwd or absolute)
  */
 async function resolveSaveDest(saveParam: string | undefined, cwd: string, ext: string): Promise<{ save: boolean; filePath?: string; conflict?: boolean }> {
@@ -70,8 +68,6 @@ async function resolveSaveDest(saveParam: string | undefined, cwd: string, ext: 
 
   if (saveParam === "project") {
     dir = cwd;
-  } else if (saveParam === "global") {
-    dir = join(homedir(), ".pi", "agent", "generated-images");
   } else {
     // Treat as file path — check for overwrite
     const filePath = saveParam.startsWith("/") ? saveParam : join(cwd, saveParam);
@@ -535,7 +531,7 @@ export default function (pi: ExtensionAPI) {
       n: Type.Optional(Type.Integer({ description: "Number of images. Default: 1." })),
       negativePrompt: Type.Optional(Type.String()),
       style: Type.Optional(Type.String({ description: "Style hint: 水墨, 油画, 写实, 卡通, etc." })),
-      save: Type.Optional(Type.String({ description: "Save destination. 'none' (inline only), 'project' (auto-name in cwd), 'global' (auto-name in global dir), or a file path like 'output.png' or '/abs/path/img.png'." })),
+      save: Type.Optional(Type.String({ description: "Save destination: 'none' (inline only), 'project' (auto-name in cwd), or a file path like 'output.png' or '/abs/path/img.png'." })),
     }),
     execute: async (_toolCallId: string, params: Record<string, unknown>, _signal, onUpdate, ctx) => {
       const prompt = (params.prompt as string)?.trim();
