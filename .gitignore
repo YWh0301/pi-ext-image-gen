@@ -5,3 +5,9 @@
 *.webp
 generated-images/
 .pi/
+*.tar.*
+pkg/
+src/
+*.zip
+*.part
+*.tgz
