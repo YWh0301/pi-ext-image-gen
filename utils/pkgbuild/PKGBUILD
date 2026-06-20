@@ -1,9 +1,9 @@
 # Maintainer: pingzi <pingzi@archlinux>
 # Contributor: pingzi <pingzi@archlinux>
 pkgname=pi-ext-image-gen
-pkgver=0.0.1
+pkgver=0.0.2
 pkgrel=1
-pkgdesc='Image generation extension for Pi coding agent — Aliyun Bailian (wan2.7, qwen-image, z-image). Generate, save, and re-save images via agent tools and commands.'
+pkgdesc='Image generation extension for Pi coding agent'
 arch=('any')
 url='https://github.com/pingzi/pi-image-gen'
 license=('MIT')
@@ -12,7 +12,7 @@ optdepends=(
   'pi-coding-agent: Pi coding agent itself'
   'pi-coding-agent-git: Pi coding agent development version'
 )
-source=("${pkgname}-${pkgver}.tar.gz::https://github.com/pingzi/pi-image-gen/archive/refs/tags/v${pkgver}.tar.gz")
+source=("${pkgname}-${pkgver}.tar.gz::https://github.com/pingzi/pi-ext-image-gen/archive/refs/tags/v${pkgver}.tar.gz")
 sha256sums=('SKIP')
 install=pi-ext.install
 options=('!strip' '!debug')
