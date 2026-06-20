@@ -1,101 +1,226 @@
-# pi-image-gen — 开发笔记
+# pi-image-gen — Agent Guide
 
-## Pi Extension 开发坑点
+## Overview
 
-### 1. `registerCommand` 的 handler 参数是 string，不是 string[]
+pi-image-gen is a [Pi](https://github.com/earendil-works/pi) extension that generates images from text prompts. It is a single-file TypeScript extension (`pi-image-gen.ts`) that registers:
 
-```typescript
-// ❌ 错误
-handler: async (args, ctx) => {
-  if (args[0] === "model") { ... }  // args 是字符串，args[0] 取到第一个字符 "m"
-}
+- **Tools** (LLM-callable): `generate_image`, `save_image`
+- **Commands** (user-invocable): `/imagine`, `/image-gen`, `/image-save`
 
-// ✅ 正确
-handler: async (args: string, ctx) => {
-  const parts = (args || "").trim().split(/\s+/);
-  if (parts[0] === "model") { ... }
-}
-```
-
-`args` 是整个参数区的字符串，不是按空格分割的数组。所有示例代码中 `args` 都是 `string` 类型，参考 `multimodal-proxy` 和 `commands.ts`。
-
-### 2. `getArgumentCompletions` 的多级补全有 bug
-
-**Issue #2874**: pi 在 Tab 补全命令后关闭 autocomplete 状态，再按 Tab 不会触发参数补全，而是触发文件补全。
-
-**Issue #2938**: Tab 接受命令后加了后缀空格，但不会自动触发下一级参数补全。
-
-**规律**：输入**字符**可以触发参数补全（pi 的字符插入处理器会调用 `tryTriggerAutocomplete`），但按 Tab 不行。
-
-**解决方案**：
-- 所有补全项目用扁平列表（单层），避免依赖二级补全
-- 或者告诉用户先打首字母再补全
-- 补全的 `value` 要带上完整的命令前缀（如 `"model qwen-image-2.0-pro"`），否则可能会替换掉前面的子命令
-
-### 3. `registerCommand` 的 `getArgumentCompletions` 不能是 async
-
-Issue #2719: `async getArgumentCompletions` 会导致 pi 崩溃。虽然 0.64.0 修了，但最好还是同步。
-
-### 4. `registerTool` 的 execute 参数签名
-
-```typescript
-execute: async (toolCallId, params, signal, onUpdate, ctx) => { ... }
-```
-
-- `toolCallId`: string
-- `params`: Record<string, unknown> — 工具参数
-- `signal`: AbortSignal — 取消信号
-- `onUpdate`: 用于在 tool call 框中显示中间状态
-- `ctx`: ExtensionContext — 当前上下文
-
-### 5. 错误处理：throw 才能让 tool call 框变红
-
-```typescript
-// ❌ 框是绿的（框架以为是成功）
-return { content: [{ type: "text", text: "生成失败: xxx" }], details: { error: "xxx" } };
-
-// ✅ 框变红（框架设 isError = true）
-throw new Error("生成失败: xxx");
-```
-
-### 6. 图片返回格式：inline data 才能在 TUI 渲染
-
-```typescript
-// ❌ URL 方式，TUI 不一定能渲染
-{ type: "image", url: "https://..." }
-
-// ✅ inline data 方式，TUI 直接显示
-{ type: "image", data: base64String, mimeType: "image/png" }
-```
-
-参考 `antigravity-image-gen.ts`。
-
-### 7. `ctx.ui.notify` 在非 TUI 模式下是 no-op
-
-在 `-p`（print）模式下，`ctx.ui.notify` 不输出任何内容。测试扩展时要进交互模式。
+Currently only **Alibaba Cloud Bailian (阿里云百炼)** has been tested with real API keys. Other providers (SiliconFlow, Tencent, OpenAI) have definitions in the code but are untested.
 
 ---
 
-## 阿里云百炼 API 坑点
+## File Structure
 
-### 1. 万相 Wan2.7 的 API 端点
-
-**同步调用**：
 ```
-POST https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation
+pi-image-gen/
+  pi-image-gen.ts    — Single-file extension (all logic)
+  AGENTS.md          — This file: agent onboarding
+  README.md          — User-facing docs
+  .gitignore         — Ignores *.png, .pi/, generated-images/
 ```
 
-请求体：
+---
+
+## pi Extension Architecture
+
+### How Extensions Load
+
+Pi auto-discovers extensions from `~/.pi/agent/extensions/*.ts` and project-local `.pi/extensions/*.ts`. They are loaded via [jiti](https://github.com/unjs/jiti) (TypeScript without compilation). The module must `export default function (pi: ExtensionAPI)`.
+
+```typescript
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { Type } from "typebox";
+
+export default function (pi: ExtensionAPI) {
+  pi.registerTool({ ... });
+  pi.registerCommand("name", { description: "...", handler: async (args, ctx) => { ... } });
+}
+```
+
+### ExtensionAPI Methods Used
+
+| Method | Purpose |
+|--------|---------|
+| `pi.registerTool({...})` | Register an LLM-callable tool |
+| `pi.registerCommand(name, {...})` | Register a slash command |
+| `pi.sendMessage({...})` | Inject a custom message into the session |
+
+### Tool Registration (`registerTool`)
+
+```typescript
+pi.registerTool({
+  name: "tool_name",              // snake_case, used by LLM
+  label: "Tool Name",             // Display name
+  description: "What it does",    // Shown to LLM to decide when to call
+  promptSnippet: "One-liner",     // Appears in "Available tools" section
+  promptGuidelines: ["..."],      // Behavioural instructions for LLM
+  parameters: Type.Object({ ... }), // Schema using typebox
+  execute: async (toolCallId, params, signal, onUpdate, ctx) => {
+    // toolCallId: string
+    // params: Record<string, unknown> (validated against parameters)
+    // signal: AbortSignal (for cancellation)
+    // onUpdate: (update) => void (stream progress to tool call box)
+    // ctx: ExtensionContext (has cwd, ui, modelRegistry, etc.)
+    return { content: [...], details: {} };
+  },
+});
+```
+
+**Critical**: To signal an error (red tool call box), `throw new Error(...)`. Returning error content in `return { content }` will NOT show red.
+
+### Command Registration (`registerCommand`)
+
+```typescript
+pi.registerCommand("command-name", {
+  description: "What it does",
+  getArgumentCompletions: (prefix) => { ... }, // Optional tab completion
+  handler: async (args: string, ctx) => { ... },
+});
+```
+
+**Critical**: `args` is a **string**, not an array. Always split manually:
+```typescript
+const parts = (args || "").trim().split(/\s+/);
+```
+
+### Tab Completion Bug
+
+Pi has a known bug (Issue #2874) where after Tab-completing a command, argument completions don't trigger. The user must type a character (not press Tab) to trigger second-level completions.
+
+In `getArgumentCompletions`, the `prefix` parameter is the text after the command name. For multi-level completion, check for spaces:
+```typescript
+getArgumentCompletions: (prefix) => {
+  const p = prefix || "";
+  const spaceAt = p.indexOf(" ");
+  if (spaceAt === -1) {
+    // First level: no space yet
+    return [{ value: "model", label: "model <name>" }];
+  }
+  // Second level: space exists
+  const first = p.slice(0, spaceAt);
+  const rest = p.slice(spaceAt + 1);
+  if (first === "model") {
+    return models.filter(m => m.startsWith(rest))
+      .map(m => ({ value: `model ${m}`, label: m }));
+  }
+}
+```
+
+**Important**: The completion `value` must include the subcommand prefix (e.g. `"model xxx"` not just `"xxx"`) because the autocomplete system replaces the ENTIRE prefix, not just the current word.
+
+### Image Rendering in TUI
+
+For inline image display in Pi TUI, tool results must return images as **base64 inline data**, not URLs:
+
+```typescript
+// ✅ Works in TUI
+{ type: "image", data: base64String, mimeType: "image/png" }
+
+// ❌ May not render
+{ type: "image", url: "https://..." }
+```
+
+Reference: `antigravity-image-gen.ts` in pi-mono examples.
+
+---
+
+## Extension Design
+
+### Provider System
+
+The extension supports multiple image generation providers via a `ProviderDef` interface:
+
+```typescript
+interface ProviderDef {
+  name: string;           // Display name
+  keyEnv: string;         // Env var name (fallback)
+  defaultModel: string;   // Default model
+  baseUrl: string;        // API base URL
+  path: string;           // Sync endpoint path
+  asyncPath?: string;     // Async endpoint path (if different)
+  openaiCompat: boolean;  // Uses OpenAI /v1/images/generations format
+  forceAsync?: boolean;   // Always use async mode
+  extraHeaders?: Record<string, string>;
+  buildBody?: (params) => Record<string, unknown>;
+  extractUrls?: (data) => string[];
+}
+```
+
+Providers are defined in `PROVIDERS` constant. Each provider has:
+- A synchronous API path
+- An optional asynchronous API path (for task-based APIs like Aliyun)
+- Custom `buildBody` for request formatting
+- Custom `extractUrls` for response parsing
+
+### Config File
+
+Location: `~/.pi/agent/image-gen.json`
+
+```json
+{
+  "apiKeys": {
+    "aliyun": "sk-xxx"
+  },
+  "defaultModel": "wan2.7-image-pro"
+}
+```
+
+- API keys are keyed by **provider id** (lowercase), NOT by environment variable name
+- Environment variables (`DASHSCOPE_API_KEY`, `SILICONFLOW_API_KEY`, etc.) serve as fallback
+- `getApiKey(providerId, envName)` checks config first, then env var
+
+### Provider Resolution
+
+`resolveProvider(providerArg, modelArg)` determines which provider to use:
+
+1. If `providerArg` is specified → use that provider (must have key)
+2. If `modelArg` or `cfg.defaultModel` is set → look up provider via `providerForModel()` from `KNOWN_MODELS` reverse map
+3. First provider with a configured key
+
+### Save System
+
+The `save` parameter in `generate_image` controls disk saving:
+- `"none"` — inline only (default)
+- `"project"` — auto-name `image.png` → `image_1.png` → etc. in project root
+- `"global"` — auto-name in `~/.pi/agent/generated-images/`
+- Any path string — save to specific path (e.g. `"output.png"`)
+
+If the target file exists for a custom path, generation still succeeds but returns a `saveConflict` message. The agent should then use `save_image` with the returned handle.
+
+### Handle System
+
+Each generated image gets a human-readable handle like `猫_ab12` (first 8 chars of sanitized prompt + 4-char random suffix). Handles are cached in memory (up to 20 entries) and can be used with `save_image` tool or `/image-save` command to re-save later.
+
+### Image Cache
+
+The `imageCache` Map stores generated image data in memory. Auto-evicts oldest entries when size exceeds 20. Lost on extension reload (ephemeral).
+
+---
+
+## Aliyun Bailian API Details
+
+### Endpoints
+
+| Mode | Endpoint |
+|------|----------|
+| Sync (Wan2.7, Qwen-Image) | `POST /api/v1/services/aigc/multimodal-generation/generation` |
+| Async creation | `POST /api/v1/services/aigc/image-generation/generation` + header `X-DashScope-Async: enable` |
+| Async poll | `GET /api/v1/tasks/{task_id}` |
+
+**Note**: The sync and async endpoints have DIFFERENT paths (`multimodal-generation` vs `image-generation`).
+
+### Request Format (Sync)
+
 ```json
 {
   "model": "wan2.7-image-pro",
   "input": {
-    "messages": [
-      {
-        "role": "user",
-        "content": [{ "text": "prompt here" }]
-      }
-    ]
+    "messages": [{
+      "role": "user",
+      "content": [{ "text": "prompt" }]
+    }]
   },
   "parameters": {
     "size": "1024*1024",
@@ -106,44 +231,8 @@ POST https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/g
 }
 ```
 
-**异步调用**（不同端点！）：
-```
-POST https://dashscope.aliyuncs.com/api/v1/services/aigc/image-generation/generation
-Header: X-DashScope-Async: enable
-```
+### Response Format
 
-轮询：
-```
-GET https://dashscope.aliyuncs.com/api/v1/tasks/{task_id}
-```
-
-**注意**：同步端点是 `multimodal-generation`，异步端点是 `image-generation`，不一样。
-
-### 2. API Key 分地域
-
-北京和新加坡的 API Key 和请求地址不同，不能混用。新加坡建议用业务空间专属域名：
-```
-https://{WorkspaceId}.ap-southeast-1.maas.aliyuncs.com
-```
-
-### 3. 尺寸参数
-
-- Wan2.7 系列：支持 `1K`、`2K`（默认）、`4K`（pro 模型文生图）
-- qwen-image 系列：总像素 512*512~2048*2048
-- 自定义尺寸用 `*` 分隔：`1024*1024`
-- OpenAI 兼容 API 用 `x`：`1024x1024`
-
-### 4. 模型间参数差异
-
-| 模型 | 关键参数 |
-|------|---------|
-| wan2.7-image-pro | `thinking_mode`, `watermark`, `size`(1K/2K/4K) |
-| qwen-image-2.0-pro | `watermark`, `prompt_extend`, `size`(宽*高), 支持 n=1-6 |
-| z-image-turbo | `prompt_extend`, `size`, 无 `watermark`/`thinking_mode` |
-
-### 5. 响应格式
-
-同步和异步轮询的响应结构一致：
 ```json
 {
   "output": {
@@ -156,26 +245,60 @@ https://{WorkspaceId}.ap-southeast-1.maas.aliyuncs.com
 }
 ```
 
---- 
+Sync and async poll responses share the same content structure.
 
-## 配置文件设计
+### Model-Specific Parameters
 
-```json
-{
-  "apiKeys": {
-    "aliyun": "sk-xxx",
-    "siliconflow": "sk-yyy"
-  },
-  "defaultModel": "wan2.7-image-pro"
-}
+| Model | Parameters | Notes |
+|-------|-----------|-------|
+| wan2.7-image-pro | `size`(1K/2K/4K), `thinking_mode`, `watermark` | Default model |
+| qwen-image-2.0-pro | `size`(宽*高), `prompt_extend`, `watermark`, `n`(1-6) | No `thinking_mode` |
+| z-image-turbo | `size`, `prompt_extend` | No `watermark` |
+
+---
+
+## Known pi Bugs
+
+### Issue #2874 — Tab completion doesn't show argument completions
+
+After Tab-completing a command, the autocomplete list disappears. Pressing Tab again triggers **file** completion, not argument completion.
+
+**Workaround**: Type a character after the space to trigger argument completions. Pi's character insertion handler calls `tryTriggerAutocomplete()`, which pulls up the correct completions.
+
+### Issue #2938 — Autocomplete doesn't continue after accepting command
+
+Same root cause. Tab-accept calls `cancelAutocomplete()` and never re-triggers for arguments.
+
+---
+
+## Development Workflow
+
+1. Edit `pi-image-gen.ts`
+2. Copy to `~/.pi/agent/extensions/pi-image-gen.ts`
+3. In pi session: `/reload`
+4. Test with tool call or command
+
+For debugging config saves:
+```bash
+cat ~/.pi/agent/image-gen.json
+node -e "
+const c = JSON.parse(require('fs').readFileSync(
+  require('path').join(require('os').homedir(), '.pi', 'agent', 'image-gen.json'), 'utf-8'));
+console.log(JSON.stringify(c, null, 2));
+"
 ```
 
-- API key 用小写 provider id 做 key（不是大写的环境变量名）
-- 环境变量作为后备（`DASHSCOPE_API_KEY` 等）
-- 当前只适配了阿里云百炼，其他 provider 的 API 未测试
+## Testing
 
-## 命名规范
+- `generate_image` tool — generates image, returns base64 data for inline display
+- `save_image(handle, filePath)` — re-saves a cached image
+- `/image-gen model <name>` — sets default model (write to config file)
+- `/image-gen key <provider> <key>` — sets API key
+- `/image-gen` — shows status
 
-- handle 用 prompt 前缀 + 4位随机：`猫_ab12`
-- 文件名用 `image.png`，重名自动 `image_1.png`、`image_2.png`
-- 所有用户可见文案用英文，简洁专业
+## Adding a New Provider
+
+1. Add entry to `PROVIDERS` with API endpoint info
+2. If not OpenAI-compatible, implement `buildBody` and `extractUrls`
+3. Add known models to `KNOWN_MODELS` for tab completion and provider detection
+4. Test with a real API key
