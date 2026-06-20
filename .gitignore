@@ -3,7 +3,7 @@
 *.jpeg
 *.gif
 *.webp
-generated-images/
+pi-ext-image-gen/
 .pi/
 *.tar.*
 pkg/

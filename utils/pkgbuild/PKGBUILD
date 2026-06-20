@@ -1,26 +1,25 @@
 # Maintainer: pingzi <pingzi@archlinux>
 # Contributor: pingzi <pingzi@archlinux>
 pkgname=pi-ext-image-gen
-pkgver=0.0.2
+pkgver=git
 pkgrel=1
-pkgdesc='Image generation extension for Pi coding agent'
+pkgdesc='Image generation extension for Pi coding agent — Aliyun Bailian (wan2.7, qwen-image, z-image).'
 arch=('any')
-url='https://github.com/pingzi/pi-image-gen'
+url='https://github.com/YWh0301/pi-ext-image-gen'
 license=('MIT')
 depends=('pi-coding-agent')
-optdepends=(
-  'pi-coding-agent: Pi coding agent itself'
-  'pi-coding-agent-git: Pi coding agent development version'
-)
-source=("${pkgname}-${pkgver}.tar.gz::https://github.com/pingzi/pi-ext-image-gen/archive/refs/tags/v${pkgver}.tar.gz")
+makedepends=('git')
+source=("git+ssh://git@github.com/YWh0301/pi-ext-image-gen.git")
 sha256sums=('SKIP')
 install=pi-ext.install
 options=('!strip' '!debug')
 
 package() {
-  install -d "${pkgdir}/usr/share/pi/extensions/pi-image-gen"
-  cp -a "${srcdir}/pi-image-gen-"*"/pi-image-gen.ts" "${pkgdir}/usr/share/pi/extensions/pi-image-gen/pi-image-gen.ts"
-
-  install -Dm644 "${srcdir}/pi-image-gen-"*"/LICENSE" "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE" 2>/dev/null || true
-  install -Dm644 "${srcdir}/pi-image-gen-"*"/README.md" "${pkgdir}/usr/share/doc/${pkgname}/README.md" 2>/dev/null || true
+  cd "${srcdir}/pi-ext-image-gen"
+  install -d "${pkgdir}/usr/share/pi/extensions/pi-image-gen/extensions"
+  cp -a "pi-image-gen.ts" "${pkgdir}/usr/share/pi/extensions/pi-image-gen/extensions/pi-image-gen.ts"
+  install -Dm644 "package.json" "${pkgdir}/usr/share/pi/extensions/pi-image-gen/package.json"
+  install -Dm644 "LICENSE" "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+  install -Dm644 "README.md" "${pkgdir}/usr/share/doc/${pkgname}/README.md" 2>/dev/null || true
+  install -Dm644 "AGENTS.md" "${pkgdir}/usr/share/doc/${pkgname}/AGENTS.md" 2>/dev/null || true
 }
